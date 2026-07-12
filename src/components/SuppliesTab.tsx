@@ -49,54 +49,14 @@ export default function SuppliesTab({
   const [notes, setNotes] = useState('');
   const [status, setStatus] = useState<'pending' | 'partial' | 'paid'>('pending');
 
-  // Itemized product builder state
-  const [items, setItems] = useState<Omit<SupplyItem, 'id'>[]>([
-    { name: '', price: 0, qty: 1, total: 0 }
-  ]);
+  // Supply Amount State
+  const [amount, setAmount] = useState('');
   const [formError, setFormError] = useState('');
-
-  // Suggestions based on active supplier category
-  const suggestedProducts = useMemo(() => {
-    if (!activeSupplier) return [];
-    const nameLower = activeSupplier.name.toLowerCase();
-    const catLower = activeSupplier.businessCategory.toLowerCase();
-    
-    if (nameLower.includes('sugarush') || nameLower.includes('cake') || nameLower.includes('parfait')) {
-      if (nameLower.includes('catering') || catLower.includes('bulk') || catLower.includes('flour')) {
-        return [
-          'Premium Bakers Flour (50kg Bag)',
-          'Fine Granulated Sugar (50kg Bag)',
-          'Baking Powder (Crate of 12)',
-          'Unsalted Butter Block (10kg)',
-          'Pure Vanilla Extract (1 Litre Bottle)',
-          'Whipped Cream Powder (Box of 6)'
-        ];
-      }
-      return [
-        'Premium Red Velvet Parfait (Large Cups)',
-        'Strawberry Delight Parfait (Large Cups)',
-        'Oreo Blast Parfait Cups (Large)',
-        'Creamy Vanilla Fruit Parfait (Medium)',
-        'Signature Chocolate Fudge Cake (8-inch)',
-        'Vanilla Caramel Sponge Cake (6-inch)',
-        'Gourmet Cupcake Box (Pack of 6)',
-        'Luxury Chocolate Cupcakes (Box of 12)',
-        'Rainbow Sprinkle Parfait (Medium Cups)'
-      ];
-    }
-    if (nameLower.includes('organic') || catLower.includes('produce')) {
-      return ['Organic Red Apples (Box)', 'Fresh Romaine Lettuce (Crate)', 'Baby Carrots (Case)', 'Sweet Strawberries (Tray)', 'Avocados Hass (Box)', 'Organic Bananas (Box)', 'English Seedless Cucumbers'];
-    }
-    if (nameLower.includes('beverage') || catLower.includes('soft drinks')) {
-      return ['Hoppy IPA Craft Beer (Case)', 'Amber Ale Craft Beer (Case)', 'Electro-Energy Drinks (Case)', 'Premium Lager (Case)', 'Organic Lemonade (Case)', 'Sparkling Mineral Water (Case)'];
-    }
-    return ['Product Item A', 'Product Item B', 'Custom Pack Premium'];
-  }, [activeSupplier]);
 
   // Calculations for current form
   const formGrandTotal = useMemo(() => {
-    return items.reduce((sum, item) => sum + (item.price * item.qty), 0);
-  }, [items]);
+    return parseFloat(amount) || 0;
+  }, [amount]);
 
   // Filter supplies for active supplier
   const filteredSupplies = useMemo(() => {
@@ -120,35 +80,6 @@ export default function SuppliesTab({
     setExpandedRecord(expandedRecord === id ? null : id);
   };
 
-  // Item form modifications
-  const handleAddItemRow = () => {
-    setItems([...items, { name: '', price: 0, qty: 1, total: 0 }]);
-  };
-
-  const handleRemoveItemRow = (index: number) => {
-    if (items.length === 1) return;
-    const newItems = [...items];
-    newItems.splice(index, 1);
-    setItems(newItems);
-  };
-
-  const handleItemFieldChange = (index: number, field: keyof Omit<SupplyItem, 'id'>, value: string | number) => {
-    const newItems = [...items];
-    const item = { ...newItems[index] };
-
-    if (field === 'name') {
-      item.name = value as string;
-    } else if (field === 'price') {
-      item.price = Math.max(0, parseFloat(value as string) || 0);
-    } else if (field === 'qty') {
-      item.qty = Math.max(1, parseInt(value as string) || 1);
-    }
-
-    item.total = item.price * item.qty;
-    newItems[index] = item;
-    setItems(newItems);
-  };
-
   // Generate a random-looking invoice number
   const handleSuggestInvoice = () => {
     const prefix = activeSupplier?.name.split(' ').map(w => w[0]).join('').toUpperCase() || 'INV';
@@ -167,17 +98,22 @@ export default function SuppliesTab({
       return;
     }
 
-    const validItems = items.filter(item => item.name.trim() !== '');
-    if (validItems.length === 0) {
-      setFormError('Please add at least one line item with a product name');
+    const parsedAmount = parseFloat(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      setFormError('Please enter a valid supply amount greater than 0');
       return;
     }
 
-    // Assign IDs to items
-    const finalItems: SupplyItem[] = validItems.map((item, idx) => ({
-      ...item,
-      id: `form-item-${Date.now()}-${idx}`,
-    }));
+    // Assign a single generic supply item representing the amount
+    const finalItems: SupplyItem[] = [
+      {
+        id: `form-item-${Date.now()}-0`,
+        name: 'Supply Dispatch',
+        price: parsedAmount,
+        qty: 1,
+        total: parsedAmount,
+      }
+    ];
 
     onAddSupply({
       supplierId: activeSupplier!.id,
@@ -185,7 +121,7 @@ export default function SuppliesTab({
       date,
       invoiceNumber,
       items: finalItems,
-      totalAmount: formGrandTotal,
+      totalAmount: parsedAmount,
       status,
       notes,
     });
@@ -196,7 +132,7 @@ export default function SuppliesTab({
     setInvoiceNumber('');
     setNotes('');
     setStatus('pending');
-    setItems([{ name: '', price: 0, qty: 1, total: 0 }]);
+    setAmount('');
     setFormError('');
     setModalOpen(false);
   };
@@ -495,80 +431,22 @@ export default function SuppliesTab({
                 </div>
               </div>
 
-              {/* Itemized list fields */}
+              {/* Supply Amount field */}
               <div className="border-t border-slate-100 pt-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-sm font-extrabold text-slate-700 uppercase tracking-wide">Itemized Products</h4>
-                  <button
-                    type="button"
-                    onClick={handleAddItemRow}
-                    className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
-                  >
-                    <Plus className="h-3 w-3" />
-                    <span>Add Item Line</span>
-                  </button>
-                </div>
-
-                <div className="space-y-3 max-h-56 overflow-y-auto pr-1">
-                  {items.map((item, index) => (
-                    <div key={index} className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-100 relative group animate-in fade-in-50 duration-150">
-                      <div className="flex-1">
-                        {/* Custom searchable/suggested text input */}
-                        <input
-                          type="text"
-                          required
-                          value={item.name}
-                          onChange={(e) => handleItemFieldChange(index, 'name', e.target.value)}
-                          placeholder="Select or enter product name..."
-                          list={`form-product-suggestions-${index}`}
-                          className="w-full px-2 py-1.5 border border-slate-200 bg-white rounded-md focus:outline-hidden text-xs"
-                        />
-                        <datalist id={`form-product-suggestions-${index}`}>
-                          {suggestedProducts.map((p, i) => (
-                            <option key={i} value={p} />
-                          ))}
-                        </datalist>
-                      </div>
-
-                      <div className="w-24">
-                        <input
-                          type="number"
-                          step="0.01"
-                          required
-                          min="0"
-                          value={item.price || ''}
-                          onChange={(e) => handleItemFieldChange(index, 'price', e.target.value)}
-                          placeholder="Price"
-                          className="w-full px-2 py-1.5 border border-slate-200 bg-white rounded-md text-right font-mono focus:outline-hidden text-xs"
-                        />
-                      </div>
-
-                      <div className="w-16">
-                        <input
-                          type="number"
-                          required
-                          min="1"
-                          value={item.qty || ''}
-                          onChange={(e) => handleItemFieldChange(index, 'qty', e.target.value)}
-                          placeholder="Qty"
-                          className="w-full px-2 py-1.5 border border-slate-200 bg-white rounded-md text-center font-mono focus:outline-hidden text-xs"
-                        />
-                      </div>
-
-                      <div className="w-20 text-right font-bold text-xs font-mono text-slate-700">
-                        ₦{(item.price * item.qty).toFixed(2)}
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveItemRow(index)}
-                        disabled={items.length === 1}
-                        className="p-1 text-slate-400 hover:text-rose-600 disabled:opacity-30 cursor-pointer"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ))}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
+                    Supply Amount (₦) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    min="0.01"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    placeholder="Enter total supply value, e.g. 50000"
+                    className="w-full px-3.5 py-2 border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-mono"
+                  />
                 </div>
               </div>
 

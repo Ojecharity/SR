@@ -11,6 +11,17 @@ import {
   initialSupplies, 
   initialPayments 
 } from './utils/initialData';
+import { db } from './lib/firebase';
+import { 
+  collection, 
+  onSnapshot, 
+  doc, 
+  setDoc, 
+  deleteDoc, 
+  updateDoc, 
+  writeBatch, 
+  getDocs 
+} from 'firebase/firestore';
 
 // Component Imports
 import Navbar from './components/Navbar';
@@ -28,145 +39,113 @@ interface Toast {
 }
 
 export default function App() {
-  // 1. Initial State Loading with LocalStorage fallback
-  const [suppliers, setSuppliers] = useState<Supplier[]>(() => {
-    try {
-      const stored = localStorage.getItem('vendor_suppliers');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed.some((s: any) => s.id === 'sup-2' || s.name === 'SugaRush Catering Supplies')) {
-          localStorage.removeItem('vendor_suppliers');
-          localStorage.removeItem('vendor_outlets');
-          localStorage.removeItem('vendor_supplies');
-          localStorage.removeItem('vendor_payments');
-          localStorage.removeItem('vendor_active_supplier_id');
-          return initialSuppliers;
-        }
-        // Migrating phone number and address if they have old values
-        let mutated = false;
-        const migrated = parsed.map((s: Supplier) => {
-          if (s.id === 'sup-1') {
-            let updated = { ...s };
-            if (s.phone === '+234 803 123 4567') {
-              updated.phone = '+234 906 993 6428';
-              mutated = true;
-            }
-            if (s.address === 'Block A3, Suite 12, Lekki Plaza, Lagos, Nigeria') {
-              updated.address = 'Olorunda, Osun, Nigeria';
-              mutated = true;
-            }
-            return updated;
-          }
-          return s;
-        });
-        if (mutated) {
-          localStorage.setItem('vendor_suppliers', JSON.stringify(migrated));
-          return migrated;
-        }
-        return parsed;
-      }
-      return initialSuppliers;
-    } catch {
-      return initialSuppliers;
-    }
-  });
-
-  const [activeSupplier, setActiveSupplier] = useState<Supplier | null>(() => {
-    try {
-      const storedActiveId = localStorage.getItem('vendor_active_supplier_id');
-      const storedSuppliers = localStorage.getItem('vendor_suppliers');
-      const loadedSuppliers = storedSuppliers 
-        ? JSON.parse(storedSuppliers) 
-        : initialSuppliers;
-      
-      const found = loadedSuppliers.find((s: Supplier) => s.id === storedActiveId);
-      const active = found || loadedSuppliers[0] || null;
-      if (active && active.id === 'sup-1') {
-        let updatedActive = { ...active };
-        let mutatedActive = false;
-        if (active.phone === '+234 803 123 4567') {
-          updatedActive.phone = '+234 906 993 6428';
-          mutatedActive = true;
-        }
-        if (active.address === 'Block A3, Suite 12, Lekki Plaza, Lagos, Nigeria') {
-          updatedActive.address = 'Olorunda, Osun, Nigeria';
-          mutatedActive = true;
-        }
-        if (mutatedActive) return updatedActive;
-      }
-      return active;
-    } catch {
-      return initialSuppliers[0] || null;
-    }
-  });
-
-  const [outlets, setOutlets] = useState<Outlet[]>(() => {
-    try {
-      const stored = localStorage.getItem('vendor_outlets');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        const filtered = parsed.filter((o: Outlet) => o.id !== 'out-1-1' && o.id !== 'out-1-2' && o.id !== 'out-1-3');
-        if (filtered.length !== parsed.length) {
-          localStorage.setItem('vendor_outlets', JSON.stringify(filtered));
-          return filtered;
-        }
-        return parsed;
-      }
-      return initialOutlets;
-    } catch {
-      return initialOutlets;
-    }
-  });
-
-  const [supplies, setSupplies] = useState<SupplyRecord[]>(() => {
-    try {
-      const stored = localStorage.getItem('vendor_supplies');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        const filtered = parsed.filter((s: SupplyRecord) => 
-          s.id !== 'sup-rec-1' && s.id !== 'sup-rec-2' && s.id !== 'sup-rec-3' && s.id !== 'sup-rec-4'
-        );
-        if (filtered.length !== parsed.length) {
-          localStorage.setItem('vendor_supplies', JSON.stringify(filtered));
-          return filtered;
-        }
-        return parsed;
-      }
-      return initialSupplies;
-    } catch {
-      return initialSupplies;
-    }
-  });
-
-  const [payments, setPayments] = useState<PaymentRecord[]>(() => {
-    try {
-      const stored = localStorage.getItem('vendor_payments');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        const filtered = parsed.filter((p: PaymentRecord) => 
-          p.id !== 'pay-rec-1' && p.id !== 'pay-rec-2' && p.id !== 'pay-rec-3'
-        );
-        const zeroed = filtered.map((p: PaymentRecord) => ({ ...p, amount: 0 }));
-        if (filtered.some(p => p.amount !== 0) || filtered.length !== parsed.length) {
-          localStorage.setItem('vendor_payments', JSON.stringify(zeroed));
-        }
-        return zeroed;
-      }
-      return initialPayments.map((p) => ({ ...p, amount: 0 }));
-    } catch {
-      return initialPayments.map((p) => ({ ...p, amount: 0 }));
-    }
-  });
+  // 1. Firebase Synchronized States
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [outlets, setOutlets] = useState<Outlet[]>([]);
+  const [supplies, setSupplies] = useState<SupplyRecord[]>([]);
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [activeSupplier, setActiveSupplier] = useState<Supplier | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   // UI State
   const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedOutletIdForLedger, setSelectedOutletIdForLedger] = useState('');
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  // 2. Synchronize States with LocalStorage
+  // 2. Real-Time Sync & Seeding with Firebase Firestore
   useEffect(() => {
-    localStorage.setItem('vendor_suppliers', JSON.stringify(suppliers));
-  }, [suppliers]);
+    let unsubscribeSuppliers: () => void;
+    let unsubscribeOutlets: () => void;
+    let unsubscribeSupplies: () => void;
+    let unsubscribePayments: () => void;
+
+    async function initFirebase() {
+      try {
+        const suppliersCol = collection(db, 'suppliers');
+        const querySnapshot = await getDocs(suppliersCol);
+        
+        if (querySnapshot.empty) {
+          console.log('Firestore is empty. Seeding initial data...');
+          const batch = writeBatch(db);
+          
+          initialSuppliers.forEach(s => {
+            batch.set(doc(db, 'suppliers', s.id), s);
+          });
+          initialOutlets.forEach(o => {
+            batch.set(doc(db, 'outlets', o.id), o);
+          });
+          initialSupplies.forEach(s => {
+            batch.set(doc(db, 'supplies', s.id), s);
+          });
+          initialPayments.forEach(p => {
+            batch.set(doc(db, 'payments', p.id), p);
+          });
+          
+          await batch.commit();
+          console.log('Seeding completed.');
+        }
+      } catch (err) {
+        console.error('Failed to initialize or seed database:', err);
+      } finally {
+        setIsLoading(false);
+      }
+
+      // Hook up live Firestore listeners
+      unsubscribeSuppliers = onSnapshot(collection(db, 'suppliers'), (snapshot) => {
+        const list: Supplier[] = [];
+        snapshot.forEach((doc) => {
+          list.push(doc.data() as Supplier);
+        });
+        setSuppliers(list);
+      }, (err) => console.error(err));
+
+      unsubscribeOutlets = onSnapshot(collection(db, 'outlets'), (snapshot) => {
+        const list: Outlet[] = [];
+        snapshot.forEach((doc) => {
+          list.push(doc.data() as Outlet);
+        });
+        setOutlets(list);
+      }, (err) => console.error(err));
+
+      unsubscribeSupplies = onSnapshot(collection(db, 'supplies'), (snapshot) => {
+        const list: SupplyRecord[] = [];
+        snapshot.forEach((doc) => {
+          list.push(doc.data() as SupplyRecord);
+        });
+        setSupplies(list);
+      }, (err) => console.error(err));
+
+      unsubscribePayments = onSnapshot(collection(db, 'payments'), (snapshot) => {
+        const list: PaymentRecord[] = [];
+        snapshot.forEach((doc) => {
+          list.push(doc.data() as PaymentRecord);
+        });
+        setPayments(list);
+      }, (err) => console.error(err));
+    }
+
+    initFirebase();
+
+    return () => {
+      if (unsubscribeSuppliers) unsubscribeSuppliers();
+      if (unsubscribeOutlets) unsubscribeOutlets();
+      if (unsubscribeSupplies) unsubscribeSupplies();
+      if (unsubscribePayments) unsubscribePayments();
+    };
+  }, []);
+
+  // Set active supplier once suppliers are loaded
+  useEffect(() => {
+    if (suppliers.length > 0) {
+      const storedActiveId = localStorage.getItem('vendor_active_supplier_id');
+      const found = suppliers.find((s) => s.id === storedActiveId);
+      if (found) {
+        setActiveSupplier(found);
+      } else if (!activeSupplier) {
+        setActiveSupplier(suppliers[0]);
+      }
+    }
+  }, [suppliers, activeSupplier]);
 
   useEffect(() => {
     if (activeSupplier) {
@@ -175,18 +154,6 @@ export default function App() {
       localStorage.removeItem('vendor_active_supplier_id');
     }
   }, [activeSupplier]);
-
-  useEffect(() => {
-    localStorage.setItem('vendor_outlets', JSON.stringify(outlets));
-  }, [outlets]);
-
-  useEffect(() => {
-    localStorage.setItem('vendor_supplies', JSON.stringify(supplies));
-  }, [supplies]);
-
-  useEffect(() => {
-    localStorage.setItem('vendor_payments', JSON.stringify(payments));
-  }, [payments]);
 
   // Toast Helpers
   const addToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -204,7 +171,7 @@ export default function App() {
   // 3. Business Actions
   
   // -- Outlet Actions
-  const handleAddOutlet = (
+  const handleAddOutlet = async (
     name: string, 
     phone: string
   ) => {
@@ -216,107 +183,149 @@ export default function App() {
       phone,
       createdAt: new Date().toISOString(),
     };
-    setOutlets((prev) => [...prev, newOutlet]);
-    addToast(`Outlet "${name}" added to current portfolio`, 'success');
+    try {
+      await setDoc(doc(db, 'outlets', newOutlet.id), newOutlet);
+      addToast(`Outlet "${name}" added to current portfolio`, 'success');
+    } catch (err) {
+      console.error(err);
+      addToast('Failed to add outlet to Firebase', 'error');
+    }
   };
 
-  const handleUpdateOutlet = (
+  const handleUpdateOutlet = async (
     id: string, 
     name: string, 
     phone: string
   ) => {
-    setOutlets((prev) =>
-      prev.map((o) =>
-        o.id === id ? { ...o, name, phone } : o
-      )
-    );
-    addToast(`Outlet profile "${name}" updated`, 'success');
+    try {
+      await updateDoc(doc(db, 'outlets', id), { name, phone });
+      addToast(`Outlet profile "${name}" updated`, 'success');
+    } catch (err) {
+      console.error(err);
+      addToast('Failed to update outlet in Firebase', 'error');
+    }
   };
 
-  const handleDeleteOutlet = (id: string) => {
+  const handleDeleteOutlet = async (id: string) => {
     const hasSupplies = supplies.some((s) => s.outletId === id);
     const hasPayments = payments.some((p) => p.outletId === id);
 
     if (hasSupplies || hasPayments) {
       if (confirm('Warning: This outlet has recorded transaction logs. Deleting this outlet profile will also remove its corresponding supplies and payments history. Do you wish to proceed?')) {
-        setOutlets((prev) => prev.filter((o) => o.id !== id));
-        setSupplies((prev) => prev.filter((s) => s.outletId !== id));
-        setPayments((prev) => prev.filter((p) => p.outletId !== id));
-        addToast('Outlet and all related ledger entries successfully deleted', 'info');
+        try {
+          const batch = writeBatch(db);
+          batch.delete(doc(db, 'outlets', id));
+          
+          supplies.filter((s) => s.outletId === id).forEach((s) => {
+            batch.delete(doc(db, 'supplies', s.id));
+          });
+          payments.filter((p) => p.outletId === id).forEach((p) => {
+            batch.delete(doc(db, 'payments', p.id));
+          });
+          
+          await batch.commit();
+          addToast('Outlet and all related ledger entries successfully deleted', 'info');
+        } catch (err) {
+          console.error(err);
+          addToast('Failed to delete outlet and transactions from Firebase', 'error');
+        }
       }
     } else {
-      setOutlets((prev) => prev.filter((o) => o.id !== id));
-      addToast('Outlet profile deleted', 'info');
+      try {
+        await deleteDoc(doc(db, 'outlets', id));
+        addToast('Outlet profile deleted', 'info');
+      } catch (err) {
+        console.error(err);
+        addToast('Failed to delete outlet from Firebase', 'error');
+      }
     }
   };
 
   // -- Supply Actions
-  const handleAddSupply = (record: Omit<SupplyRecord, 'id' | 'createdAt'>) => {
+  const handleAddSupply = async (record: Omit<SupplyRecord, 'id' | 'createdAt'>) => {
     const newRecord: SupplyRecord = {
       ...record,
       id: `sup-rec-${Date.now()}`,
       createdAt: new Date().toISOString(),
     };
-    setSupplies((prev) => [...prev, newRecord]);
-    addToast(`Supply Invoice ${record.invoiceNumber} successfully posted!`, 'success');
+    try {
+      await setDoc(doc(db, 'supplies', newRecord.id), newRecord);
+      addToast(`Supply Invoice ${record.invoiceNumber} successfully posted!`, 'success');
+    } catch (err) {
+      console.error(err);
+      addToast('Failed to post invoice to Firebase', 'error');
+    }
   };
 
-  const handleUpdateSupplyStatus = (id: string, status: 'pending' | 'partial' | 'paid') => {
-    setSupplies((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, status } : s))
-    );
-    addToast(`Invoice status updated to ${status.toUpperCase()}`, 'success');
+  const handleUpdateSupplyStatus = async (id: string, status: 'pending' | 'partial' | 'paid') => {
+    try {
+      await updateDoc(doc(db, 'supplies', id), { status });
+      addToast(`Invoice status updated to ${status.toUpperCase()}`, 'success');
+    } catch (err) {
+      console.error(err);
+      addToast('Failed to update invoice status in Firebase', 'error');
+    }
   };
 
-  const handleDeleteSupply = (id: string) => {
+  const handleDeleteSupply = async (id: string) => {
     if (confirm('Are you sure you want to delete this supply record? This is irreversible.')) {
-      setSupplies((prev) => prev.filter((s) => s.id !== id));
-      addToast('Supply record removed from ledger', 'info');
+      try {
+        await deleteDoc(doc(db, 'supplies', id));
+        addToast('Supply record removed from ledger', 'info');
+      } catch (err) {
+        console.error(err);
+        addToast('Failed to delete supply record from Firebase', 'error');
+      }
     }
   };
 
   // -- Payment Actions
-  const handleAddPayment = (record: Omit<PaymentRecord, 'id' | 'createdAt'>) => {
+  const handleAddPayment = async (record: Omit<PaymentRecord, 'id' | 'createdAt'>) => {
     const newRecord: PaymentRecord = {
       ...record,
       id: `pay-rec-${Date.now()}`,
       createdAt: new Date().toISOString(),
     };
-    setPayments((prev) => [...prev, newRecord]);
 
-    // Intelligently auto-resolve pending supplies for this outlet!
-    // If the payment is equivalent or more, we can auto-update the oldest pending/partial invoice to "paid".
-    // This is a premium touch of financial bookkeeping!
-    const outletPendingInvoices = supplies
-      .filter((s) => s.outletId === record.outletId && s.status !== 'paid')
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    try {
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'payments', newRecord.id), newRecord);
 
-    let remainingPayment = record.amount;
-    const updatedSupplies = [...supplies];
+      // Intelligently auto-resolve pending supplies for this outlet!
+      const outletPendingInvoices = supplies
+        .filter((s) => s.outletId === record.outletId && s.status !== 'paid')
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-    for (const invoice of outletPendingInvoices) {
-      if (remainingPayment <= 0) break;
-      const index = updatedSupplies.findIndex((s) => s.id === invoice.id);
-      if (index !== -1) {
-        // Simple mock allocation: If remaining payment can fully offset the invoice, mark paid
+      let remainingPayment = record.amount;
+
+      for (const invoice of outletPendingInvoices) {
+        if (remainingPayment <= 0) break;
         if (remainingPayment >= invoice.totalAmount) {
-          updatedSupplies[index].status = 'paid';
+          batch.update(doc(db, 'supplies', invoice.id), { status: 'paid' });
           remainingPayment -= invoice.totalAmount;
         } else {
-          updatedSupplies[index].status = 'partial';
+          batch.update(doc(db, 'supplies', invoice.id), { status: 'partial' });
           remainingPayment = 0;
         }
       }
-    }
-    setSupplies(updatedSupplies);
 
-    addToast(`Payment receipt recorded! Deposited ₦${record.amount.toFixed(2)}`, 'success');
+      await batch.commit();
+      addToast(`Payment receipt recorded! Deposited ₦${record.amount.toFixed(2)}`, 'success');
+    } catch (err) {
+      console.error(err);
+      addToast('Failed to record payment receipt in Firebase', 'error');
+    }
   };
 
-  const handleDeletePayment = (id: string) => {
+  const handleDeletePayment = async (id: string) => {
     if (confirm('Are you sure you want to delete this payment record? Balance histories will adjust.')) {
-      setPayments((prev) => prev.filter((p) => p.id !== id));
-      addToast('Payment receipt removed from ledger', 'info');
+      try {
+        await deleteDoc(doc(db, 'payments', id));
+        addToast('Payment receipt removed from ledger', 'info');
+      } catch (err) {
+        console.error(err);
+        addToast('Failed to delete payment from Firebase', 'error');
+      }
     }
   };
 
@@ -342,7 +351,7 @@ export default function App() {
     addToast('Backup exported successfully', 'success');
   };
 
-  const handleImportData = (jsonString: string) => {
+  const handleImportData = async (jsonString: string) => {
     try {
       const parsed = JSON.parse(jsonString);
       if (
@@ -355,25 +364,50 @@ export default function App() {
         return;
       }
 
-      setSuppliers(parsed.suppliers);
-      setOutlets(parsed.outlets);
-      setSupplies(parsed.supplies);
-      setPayments(parsed.payments);
+      const batch = writeBatch(db);
+
+      // Clean/Set records in Firebase
+      parsed.suppliers.forEach((s: Supplier) => {
+        batch.set(doc(db, 'suppliers', s.id), s);
+      });
+      parsed.outlets.forEach((o: Outlet) => {
+        batch.set(doc(db, 'outlets', o.id), o);
+      });
+      parsed.supplies.forEach((s: SupplyRecord) => {
+        batch.set(doc(db, 'supplies', s.id), s);
+      });
+      parsed.payments.forEach((p: PaymentRecord) => {
+        batch.set(doc(db, 'payments', p.id), p);
+      });
+
+      await batch.commit();
       
       if (parsed.suppliers.length > 0) {
         setActiveSupplier(parsed.suppliers[0]);
       }
 
       addToast('Records imported successfully! Database updated.', 'success');
-    } catch {
+    } catch (err) {
+      console.error(err);
       addToast('Failed to import backup. Please ensure the file is valid JSON.', 'error');
     }
   };
 
-  const handleSetAllPaymentsToZero = () => {
-    setPayments((prev) => prev.map((p) => ({ ...p, amount: 0 })));
-    setSupplies((prev) => prev.map((s) => ({ ...s, status: 'pending' })));
-    addToast('All payment amounts set to ₦0.00. Invoice statuses updated to PENDING.', 'info');
+  const handleSetAllPaymentsToZero = async () => {
+    try {
+      const batch = writeBatch(db);
+      payments.forEach((p) => {
+        batch.update(doc(db, 'payments', p.id), { amount: 0 });
+      });
+      supplies.forEach((s) => {
+        batch.update(doc(db, 'supplies', s.id), { status: 'pending' });
+      });
+      await batch.commit();
+      addToast('All payment amounts set to ₦0.00. Invoice statuses updated to PENDING.', 'info');
+    } catch (err) {
+      console.error(err);
+      addToast('Failed to reset all payments to zero', 'error');
+    }
   };
 
   // Render current active tab content
@@ -445,6 +479,17 @@ export default function App() {
     }
   };
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center font-sans">
+        <div className="flex flex-col items-center space-y-4">
+          <div className="h-10 w-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+          <h2 className="text-sm font-semibold text-slate-600 animate-pulse">Connecting to Secure Firebase Database...</h2>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans" id="app-container">
       {/* Navbar with active supplier selector and backup mechanics */}
@@ -467,10 +512,13 @@ export default function App() {
       <footer className="bg-white border-t border-slate-200 py-6" id="app-footer">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="text-xs text-slate-400">
-            &copy; 2026 VendorLedger. Secure local ledger accounting system.
+            &copy; 2026 VendorLedger. Secure Firestore database ledger accounting system.
           </div>
           <div className="flex items-center space-x-4 text-xs font-semibold text-slate-500">
-            <span>Offline Database Enabled</span>
+            <span className="flex items-center space-x-1.5 text-emerald-600">
+              <span className="h-2 w-2 bg-emerald-500 rounded-full animate-pulse" />
+              <span>Firebase Cloud Synced</span>
+            </span>
             <div className="h-4 w-[1px] bg-slate-200" />
             <span>Multi-Account Ledger Isolation</span>
           </div>
