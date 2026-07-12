@@ -1,0 +1,105 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with registration and business details",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "businessName": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Supplier profile associated with a user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "businessCategory": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "address": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "name"]
+    },
+    "Outlet": {
+      "title": "Outlet",
+      "description": "Buyer or retail outlet profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "supplierId": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "supplierId", "name"]
+    },
+    "SupplyRecord": {
+      "title": "SupplyRecord",
+      "description": "A recorded batch of supplies dispatched to a retail outlet",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "supplierId": { "type": "string" },
+        "outletId": { "type": "string" },
+        "date": { "type": "string" },
+        "invoiceNumber": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "partial", "paid"] },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "supplierId", "outletId", "totalAmount", "status"]
+    },
+    "PaymentRecord": {
+      "title": "PaymentRecord",
+      "description": "A recorded payment received from a retail outlet",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "supplierId": { "type": "string" },
+        "outletId": { "type": "string" },
+        "date": { "type": "string" },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["cash", "transfer", "cheque", "pos", "other"] },
+        "referenceNumber": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "supplierId", "outletId", "amount", "paymentMethod"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Access to personal user account profile"
+    },
+    "/suppliers/{supplierId}": {
+      "schema": "Supplier",
+      "description": "Collections of suppliers managed by authenticated users"
+    },
+    "/outlets/{outletId}": {
+      "schema": "Outlet",
+      "description": "Collections of outlets managed by authenticated users"
+    },
+    "/supplies/{supplyId}": {
+      "schema": "SupplyRecord",
+      "description": "Dispatched supply records"
+    },
+    "/payments/{paymentId}": {
+      "schema": "PaymentRecord",
+      "description": "Recorded payments"
+    }
+  }
+}

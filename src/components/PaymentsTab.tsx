@@ -26,6 +26,7 @@ interface PaymentsTabProps {
   onAddPayment: (record: Omit<PaymentRecord, 'id' | 'createdAt'>) => void;
   onDeletePayment: (id: string) => void;
   onSetAllPaymentsToZero: () => void;
+  onAddOutlet: (name: string, phone: string) => void;
 }
 
 export default function PaymentsTab({
@@ -36,10 +37,36 @@ export default function PaymentsTab({
   onAddPayment,
   onDeletePayment,
   onSetAllPaymentsToZero,
+  onAddOutlet,
 }: PaymentsTabProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [methodFilter, setMethodFilter] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
+
+  // Inline Outlet Form State
+  const [addOutletInlineOpen, setAddOutletInlineOpen] = useState(false);
+  const [inlineOutletName, setInlineOutletName] = useState('');
+  const [inlineOutletPhone, setInlineOutletPhone] = useState('');
+  const [inlineError, setInlineError] = useState('');
+  const [shouldAutoSelectLatest, setShouldAutoSelectLatest] = useState(false);
+
+  React.useEffect(() => {
+    if (shouldAutoSelectLatest && activeSupplier) {
+      const activeOutlets = outlets.filter(o => o.supplierId === activeSupplier.id);
+      if (activeOutlets.length > 0) {
+        // Sort by ID to find the latest added outlet
+        const sorted = [...activeOutlets].sort((a, b) => b.id.localeCompare(a.id));
+        if (sorted[0]) {
+          setOutletId(sorted[0].id);
+        }
+        setShouldAutoSelectLatest(false);
+        setAddOutletInlineOpen(false);
+        setInlineOutletName('');
+        setInlineOutletPhone('');
+        setInlineError('');
+      }
+    }
+  }, [outlets, shouldAutoSelectLatest, activeSupplier]);
 
   // Form Fields
   const [outletId, setOutletId] = useState('');
@@ -292,9 +319,18 @@ export default function PaymentsTab({
 
               {/* Outlet selector */}
               <div>
-                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
-                  Select Paying Outlet *
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                    Select Paying Outlet *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setAddOutletInlineOpen(!addOutletInlineOpen)}
+                    className="text-[10px] sm:text-xs text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
+                  >
+                    {addOutletInlineOpen ? 'Cancel' : '➕ Add New'}
+                  </button>
+                </div>
                 <select
                   required
                   value={outletId}
@@ -306,6 +342,46 @@ export default function PaymentsTab({
                     <option key={o.id} value={o.id}>{o.name}</option>
                   ))}
                 </select>
+
+                {addOutletInlineOpen && (
+                  <div className="mt-2.5 p-3 bg-indigo-50/50 border border-indigo-100 rounded-lg space-y-2 animate-in slide-in-from-top-1 duration-150">
+                    <p className="text-[11px] font-bold text-indigo-900">Add Outlet Inline</p>
+                    {inlineError && (
+                      <p className="text-[10px] text-rose-600 font-medium">{inlineError}</p>
+                    )}
+                    <div className="space-y-1.5">
+                      <input
+                        type="text"
+                        placeholder="Outlet / Buyer Name"
+                        value={inlineOutletName}
+                        onChange={(e) => setInlineOutletName(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-md text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-hidden"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Contact Phone (Optional)"
+                        value={inlineOutletPhone}
+                        onChange={(e) => setInlineOutletPhone(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-md text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-hidden"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!inlineOutletName.trim()) {
+                            setInlineError('Name is required');
+                            return;
+                          }
+                          setInlineError('');
+                          setShouldAutoSelectLatest(true);
+                          onAddOutlet(inlineOutletName.trim(), inlineOutletPhone.trim());
+                        }}
+                        className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-xs font-semibold cursor-pointer transition-colors"
+                      >
+                        Save & Select Outlet
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Outstanding Assist Panel */}

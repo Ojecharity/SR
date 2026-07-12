@@ -5,6 +5,7 @@
 
 export interface Supplier {
   id: string;
+  userId?: string;
   name: string;
   businessCategory: string;
   phone: string;
@@ -15,6 +16,7 @@ export interface Supplier {
 
 export interface Outlet {
   id: string;
+  userId?: string;
   supplierId: string;
   name: string;
   phone: string;
@@ -31,6 +33,7 @@ export interface SupplyItem {
 
 export interface SupplyRecord {
   id: string;
+  userId?: string;
   supplierId: string;
   outletId: string;
   date: string;
@@ -44,6 +47,7 @@ export interface SupplyRecord {
 
 export interface PaymentRecord {
   id: string;
+  userId?: string;
   supplierId: string;
   outletId: string;
   date: string;
