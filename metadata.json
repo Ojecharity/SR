@@ -1,0 +1,6 @@
+{
+  "name": "Vendor Supply and Payment Tracker",
+  "description": "A ledger for vendors to record supplies delivered to different outlets and the payments received from them, maintaining accurate balances and transaction histories.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
